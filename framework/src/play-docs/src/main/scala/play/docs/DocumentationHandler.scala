@@ -1,3 +1,6 @@
+/*
+ * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ */
 package play.docs
 
 import play.api.mvc._
@@ -16,7 +19,9 @@ import org.apache.commons.io.IOUtils
  * Documentation is located in the given repository - either a JAR file or directly from
  * the filesystem.
  */
-class DocumentationHandler(repo: FileRepository) extends SBTDocHandler {
+class DocumentationHandler(repo: FileRepository, apiRepo: FileRepository) extends SBTDocHandler {
+
+  def this(repo: FileRepository) = this(repo, repo)
 
   val markdownRenderer = new PlayDoc(repo, repo, "resources", PlayVersion.current)
 
@@ -32,7 +37,7 @@ class DocumentationHandler(repo: FileRepository) extends SBTDocHandler {
   def maybeHandleDocRequest(request: RequestHeader): Option[SimpleResult] = {
 
     // Assumes caller consumes result, closing entry
-    def sendFileInline(path: String): Option[SimpleResult] = {
+    def sendFileInline(repo: FileRepository, path: String): Option[SimpleResult] = {
       import play.api.libs.concurrent.Execution.Implicits.defaultContext
       repo.handleFile(path) { handle =>
         SimpleResult(
@@ -79,7 +84,7 @@ class DocumentationHandler(repo: FileRepository) extends SBTDocHandler {
       case apiDoc(page) => {
 
         Some {
-          sendFileInline("api/" + page).getOrElse(NotFound(views.html.play20.manual(page, None, None)))
+          sendFileInline(apiRepo, "api/" + page).getOrElse(NotFound(views.html.play20.manual(page, None, None)))
         }
 
       }
@@ -87,7 +92,7 @@ class DocumentationHandler(repo: FileRepository) extends SBTDocHandler {
       case wikiResource(path) => {
 
         Some {
-          sendFileInline(path).getOrElse(NotFound("Resource not found [" + path + "]"))
+          sendFileInline(repo, path).getOrElse(NotFound("Resource not found [" + path + "]"))
         }
 
       }

@@ -1,7 +1,11 @@
+/*
+ * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ */
 import sbt._
 import Keys._
 import com.typesafe.tools.mima.plugin.MimaPlugin.mimaDefaultSettings
-import com.typesafe.tools.mima.plugin.MimaKeys.previousArtifact
+import com.typesafe.tools.mima.plugin.MimaKeys.{previousArtifact, binaryIssueFilters}
+import com.typesafe.tools.mima.core._
 import com.typesafe.sbt.SbtScalariform.defaultScalariformSettings
 
 object BuildSettings {
@@ -21,14 +25,14 @@ object BuildSettings {
   val experimental = Option(System.getProperty("experimental")).filter(_ == "true").map(_ => true).getOrElse(false)
 
   val buildOrganization = "com.typesafe.play"
-  val buildVersion = propOr("play.version", "2.2-SNAPSHOT")
+  val buildVersion = propOr("play.version", "2.3-SNAPSHOT")
   val buildWithDoc = boolProp("generate.doc")
   val previousVersion = "2.1.0"
-  val buildScalaVersion = propOr("scala.version", "2.10.2")
+  val buildScalaVersion = propOr("scala.version", "2.10.3-RC3")
   // TODO - Try to compute this from SBT... or not.
-  val buildScalaVersionForSbt = propOr("play.sbt.scala.version", "2.10.2")
+  val buildScalaVersionForSbt = propOr("play.sbt.scala.version", "2.10.3-RC3")
   val buildScalaBinaryVersionForSbt = CrossVersion.binaryScalaVersion(buildScalaVersionForSbt)
-  val buildSbtVersion = propOr("play.sbt.version", "0.13.0-RC4")
+  val buildSbtVersion = propOr("play.sbt.version", "0.13.0")
   val buildSbtMajorVersion = "0.13"
   val buildSbtVersionBinaryCompatible = CrossVersion.binarySbtVersion(buildSbtVersion)
   // Used by api docs generation to link back to the correct branch on GitHub, only when version is a SNAPSHOT
@@ -52,9 +56,15 @@ object BuildSettings {
     parallelExecution in PerformanceTest := false
   )
 
+  val dontPublishSettings = Seq(
+    publishArtifact := false,
+    // Needed for sbt-pgp's publish-signed-configuration task, even though there are no artifacts
+    publishTo := Some(Resolver.file("Unused transient repository", file("target/unusedrepo")))
+  )
+
   def PlaySharedJavaProject(name: String, dir: String, testBinaryCompatibility: Boolean = false): Project = {
     val bcSettings: Seq[Setting[_]] = if (testBinaryCompatibility) {
-      mimaDefaultSettings ++ Seq(previousArtifact := Some(buildOrganization % name % previousVersion))
+      mimaDefaultSettings ++ Seq(previousArtifact := Some(buildOrganization % StringUtilities.normalize(name) % previousVersion))
     } else Nil
     Project(name, file("src/" + dir))
       .configs(PerformanceTest)
@@ -79,7 +89,8 @@ object BuildSettings {
   }
 
   def playRuntimeSettings(name: String): Seq[Setting[_]] = Seq(
-    previousArtifact := Some(buildOrganization %% name % previousVersion),
+    previousArtifact := Some(buildOrganization %
+      (StringUtilities.normalize(name) + "_" + CrossVersion.binaryScalaVersion(buildScalaVersion)) % previousVersion),
     scalacOptions ++= Seq("-encoding", "UTF-8", "-Xlint", "-deprecation", "-unchecked", "-feature"),
     publishArtifact in packageDoc := buildWithDoc,
     publishArtifact in (Compile, packageSrc) := true,
@@ -95,7 +106,7 @@ object BuildSettings {
         scalaBinaryVersion := CrossVersion.binaryScalaVersion(buildScalaVersionForSbt),
         publishTo := Some(publishingMavenRepository),
         publishArtifact in packageDoc := false,
-        publishArtifact in (Compile, packageSrc) := false,
+        publishArtifact in (Compile, packageSrc) := true,
         scalacOptions ++= Seq("-encoding", "UTF-8", "-Xlint", "-deprecation", "-unchecked"))
   }
 }
@@ -108,15 +119,15 @@ object Resolvers {
   val typesafeSnapshots = "Typesafe Snapshots Repository" at "http://repo.typesafe.com/typesafe/snapshots/"
   val typesafeIvyReleases = Resolver.url("Typesafe Ivy Releases Repository", url("http://repo.typesafe.com/typesafe/ivy-releases"))(Resolver.ivyStylePatterns)
   val typesafeIvySnapshots = Resolver.url("Typesafe Ivy Snapshots Repository", url("http://repo.typesafe.com/typesafe/ivy-snapshots"))(Resolver.ivyStylePatterns)
-  val publishTypesafeMavenReleases = "Typesafe Maven Releases Repository for publishing" at "https://typesafe.artifactoryonline.com/typesafe/maven-releases/"
-  val publishTypesafeMavenSnapshots = "Typesafe Maven Snapshots Repository for publishing" at "https://typesafe.artifactoryonline.com/typesafe/maven-snapshots/"
-  val publishTypesafeIvyReleases = Resolver.url("Typesafe Ivy Releases Repository for publishing", url("https://typesafe.artifactoryonline.com/typesafe/ivy-releases/"))(Resolver.ivyStylePatterns)
-  val publishTypesafeIvySnapshots = Resolver.url("Typesafe Ivy Snapshots Repository for publishing", url("https://typesafe.artifactoryonline.com/typesafe/ivy-snapshots/"))(Resolver.ivyStylePatterns)
+  val publishTypesafeMavenReleases = "Typesafe Maven Releases Repository for publishing" at "https://private-repo.typesafe.com/typesafe/maven-releases/"
+  val publishTypesafeMavenSnapshots = "Typesafe Maven Snapshots Repository for publishing" at "https://private-repo.typesafe.com/typesafe/maven-snapshots/"
+  val publishTypesafeIvyReleases = Resolver.url("Typesafe Ivy Releases Repository for publishing", url("https://private-repo.typesafe.com/typesafe/ivy-releases/"))(Resolver.ivyStylePatterns)
+  val publishTypesafeIvySnapshots = Resolver.url("Typesafe Ivy Snapshots Repository for publishing", url("https://private-repo.typesafe.com/typesafe/ivy-snapshots/"))(Resolver.ivyStylePatterns)
 
   val sonatypeSnapshots = "Sonatype snapshots" at "http://oss.sonatype.org/content/repositories/snapshots/"
 
   val isSnapshotBuild = buildVersion.endsWith("SNAPSHOT")
-  val typesafeResolvers = if (isSnapshotBuild) Seq(typesafeReleases, typesafeSnapshots) else Seq(typesafeReleases)
+  val typesafeResolvers = if (isSnapshotBuild) Seq(typesafeReleases, typesafeIvyReleases, typesafeSnapshots, typesafeIvySnapshots) else Seq(typesafeReleases, typesafeIvyReleases)
   val publishingMavenRepository = if (isSnapshotBuild) publishTypesafeMavenSnapshots else publishTypesafeMavenReleases
   val publishingIvyRepository = if (isSnapshotBuild) publishTypesafeIvySnapshots else publishTypesafeIvyReleases
 }
@@ -239,7 +250,11 @@ object PlayBuild extends Build {
           d.organization + ":" + d.name + ":" + d.revision
         }.sorted.foreach(println)
       },
-      publishTo := Some(publishingIvyRepository)
+      publishTo := Some(publishingIvyRepository),
+      // Must be false, because due to the way SBT integrates with test libraries, and the way SBT uses Java object
+      // serialisation to communicate with forked processes, and because this plugin will have SBT 0.13 on the forked
+      // processes classpath while it's actually being run by SBT 0.12... if it forks you get serialVersionUID errors.
+      fork in Test := false
     ).settings(scriptedSettings: _*)
     .settings(
       scriptedLaunchOpts <++= (baseDirectory in ThisBuild) { baseDir =>
@@ -255,40 +270,81 @@ object PlayBuild extends Build {
 
   lazy val ConsoleProject = PlaySbtProject("Console", "console")
     .settings(
-      resolvers += typesafeIvyReleases,
       libraryDependencies := consoleDependencies,
       sourceGenerators in Compile <+= sourceManaged in Compile map PlayVersion
     )
 
   lazy val PlayFiltersHelpersProject = PlayRuntimeProject("Filters-Helpers", "play-filters-helpers")
-    .dependsOn(PlayProject)
+    .settings(
+      binaryIssueFilters ++= Seq(
+        // When we upgrade to mima with SBT 0.13 we can filter by package...
+        // Basically we had to change CSRFFilter to use by name parameters, which meant it could no
+        // longer be a case class, which is why there's so much breakage here.
+        ProblemFilters.exclude[MissingTypesProblem]("play.filters.csrf.CSRFFilter"),
+        ProblemFilters.exclude[MissingMethodProblem]("play.filters.csrf.CSRFFilter.copy$default$3"),
+        ProblemFilters.exclude[MissingMethodProblem]("play.filters.csrf.CSRFFilter.copy"),
+        ProblemFilters.exclude[MissingMethodProblem]("play.filters.csrf.CSRFFilter.copy$default$1"),
+        ProblemFilters.exclude[MissingMethodProblem]("play.filters.csrf.CSRFFilter.copy$default$2"),
+        ProblemFilters.exclude[MissingMethodProblem]("play.filters.csrf.CSRFFilter.toString"),
+        ProblemFilters.exclude[MissingMethodProblem]("play.filters.csrf.CSRFFilter.productPrefix"),
+        ProblemFilters.exclude[MissingMethodProblem]("play.filters.csrf.CSRFFilter.createIfNotFound"),
+        ProblemFilters.exclude[MissingMethodProblem]("play.filters.csrf.CSRFFilter.productArity"),
+        ProblemFilters.exclude[MissingMethodProblem]("play.filters.csrf.CSRFFilter.this"),
+        ProblemFilters.exclude[MissingMethodProblem]("play.filters.csrf.CSRFFilter.canEqual"),
+        ProblemFilters.exclude[MissingMethodProblem]("play.filters.csrf.CSRFFilter.equals"),
+        ProblemFilters.exclude[MissingMethodProblem]("play.filters.csrf.CSRFFilter.tokenName"),
+        ProblemFilters.exclude[MissingMethodProblem]("play.filters.csrf.CSRFFilter.productElement"),
+        ProblemFilters.exclude[MissingMethodProblem]("play.filters.csrf.CSRFFilter.cookieName"),
+        ProblemFilters.exclude[MissingMethodProblem]("play.filters.csrf.CSRFFilter.hashCode"),
+        ProblemFilters.exclude[MissingMethodProblem]("play.filters.csrf.CSRFFilter.copy$default$4"),
+        ProblemFilters.exclude[MissingMethodProblem]("play.filters.csrf.CSRFFilter.secureCookie"),
+        ProblemFilters.exclude[MissingMethodProblem]("play.filters.csrf.CSRFFilter.productIterator"),
+        ProblemFilters.exclude[MissingTypesProblem]("play.filters.csrf.CSRFFilter$"),
+        ProblemFilters.exclude[MissingMethodProblem]("play.filters.csrf.CSRFFilter.apply"),
+        ProblemFilters.exclude[MissingMethodProblem]("play.filters.csrf.CSRFFilter.apply"),
+        ProblemFilters.exclude[MissingMethodProblem]("play.filters.csrf.CSRFFilter.unapply"),
+        ProblemFilters.exclude[MissingMethodProblem]("play.filters.csrf.CSRFFilter.toString"),
+        ProblemFilters.exclude[MissingMethodProblem]("play.filters.csrf.CSRFAction.this"),
+        ProblemFilters.exclude[MissingMethodProblem]("play.filters.csrf.CSRFAddToken#CSRFAddTokenAction.this"),
+        ProblemFilters.exclude[MissingMethodProblem]("play.filters.csrf.CSRFCheck#CSRFCheckAction.this")
+      ),
+      parallelExecution in Test := false
+    ).dependsOn(PlayProject, PlayTestProject % "test", PlayJavaProject % "test")
 
   // This project is just for testing Play, not really a public artifact
   lazy val PlayIntegrationTestProject = PlayRuntimeProject("Play-Integration-Test", "play-integration-test")
     .settings(
-      parallelExecution in Test := false
+      parallelExecution in Test := false,
+      libraryDependencies := integrationTestDependencies,
+      previousArtifact := None
     )
-    .dependsOn(PlayProject, PlayTestProject)
+    .dependsOn(PlayProject % "test->test", PlayTestProject)
 
   lazy val PlayCacheProject = PlayRuntimeProject("Play-Cache", "play-cache")
-    .settings(libraryDependencies := playCacheDeps)
-    .dependsOn(PlayProject)
+    .settings(
+      libraryDependencies := playCacheDeps,
+      parallelExecution in Test := false
+    ).dependsOn(PlayProject)
+    .dependsOn(PlayTestProject % "test")
 
   import RepositoryBuilder._
   lazy val RepositoryProject = Project(
       "Play-Repository", file("repository"))
+    .settings(dontPublishSettings:_*)
     .settings(localRepoCreationSettings:_*)
     .settings(
       localRepoProjectsPublished <<= (publishedProjects map (publishLocal in _)).dependOn,
       addProjectsToRepository(publishedProjects),
       localRepoArtifacts ++= Seq(
-        "org.scala-lang" % "scala-compiler" % BuildSettings.buildScalaVersion,
-        "org.scala-lang" % "scala-compiler" % BuildSettings.buildScalaVersionForSbt,
-        "org.scala-sbt" % "sbt" % BuildSettings.buildSbtVersion
-      ),
-      publish := {}
+        "org.scala-lang" % "scala-compiler" % BuildSettings.buildScalaVersion % "master",
+        "org.scala-lang" % "jline" % BuildSettings.buildScalaVersion % "master",
+        "org.scala-lang" % "scala-compiler" % BuildSettings.buildScalaVersionForSbt % "master",
+        "org.scala-lang" % "jline" % BuildSettings.buildScalaVersionForSbt % "master",
+        "org.scala-sbt" % "sbt" % BuildSettings.buildSbtVersion,
+        "org.fusesource.jansi" % "jansi" % "1.11" % "master"
+      )
     )
-    
+
   lazy val publishedProjects = Seq[ProjectReference](
     PlayProject,
     SbtLinkProject,
@@ -319,11 +375,11 @@ object PlayBuild extends Build {
     "Root",
     file("."))
     .settings(playCommonSettings: _*)
+    .settings(dontPublishSettings:_*)
     .settings(
       libraryDependencies := (runtime ++ jdbcDeps),
       Docs.apiDocsInclude := false,
       Docs.apiDocsIncludeManaged := false,
-      publish := {},
       generateDistTask
     )
     .aggregate(publishedProjects: _*)

@@ -1,8 +1,12 @@
+/*
+ * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ */
 package play.api.mvc
 
 import play.api.libs.iteratee._
 import play.api.http._
 import play.api.http.HeaderNames._
+import play.api.http.HttpProtocol._
 import play.api.{ Application, Play }
 import play.api.i18n.Lang
 
@@ -28,7 +32,6 @@ case class ResponseHeader(status: Int, headers: Map[String, String] = Map.empty)
 /**
  * Any Action result.
  */
-@deprecated("Result will become SimpleResult in Play 2.3", "2.2.0")
 sealed trait Result extends NotNull with WithHeaders[Result]
 
 sealed trait WithHeaders[+A <: Result] {
@@ -648,7 +651,6 @@ object Results extends Results {
 trait Results {
 
   import play.api.http.Status._
-  import play.api.http.HeaderNames._
 
   /**
    * Generates default `SimpleResult` from a content type, headers and content.

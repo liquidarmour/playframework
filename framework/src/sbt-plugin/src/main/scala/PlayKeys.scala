@@ -1,3 +1,6 @@
+/*
+ * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ */
 package play
 
 import sbt._
@@ -83,7 +86,8 @@ trait Keys {
 
   val devSettings = SettingKey[Seq[(String, String)]]("play-dev-settings")
 
-  val scalaIdePlay2Prefs = TaskKey[Unit]("scala-ide-play2-prefs")
+  // An SBT scope used when the Play app is in run in "production mode" using the "play start" command
+  val Production = config("production")
 
   // Constants that may be useful elsewhere
   val defaultJavaTemplatesImport = Seq(

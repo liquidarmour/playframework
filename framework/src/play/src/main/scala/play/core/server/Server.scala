@@ -1,3 +1,6 @@
+/*
+ * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ */
 package play.core.server
 
 import scala.language.postfixOps
@@ -9,6 +12,7 @@ import play.api.mvc._
 import scala.concurrent.duration._
 import scala.util.{ Try, Success, Failure }
 import scala.util.control.NonFatal
+import scala.concurrent.Future
 
 trait WebSocketable {
   def getHeader(header: String): String
@@ -39,7 +43,7 @@ trait Server {
 
   def mode: Mode.Mode
 
-  def getHandlerFor(request: RequestHeader): Either[SimpleResult, (RequestHeader, Handler, Application)] = {
+  def getHandlerFor(request: RequestHeader): Either[Future[SimpleResult], (RequestHeader, Handler, Application)] = {
 
     import scala.util.control.Exception
 
@@ -74,8 +78,8 @@ trait Server {
     }
 
     Exception
-      .allCatch[Option[SimpleResult]]
-      .either(applicationProvider.handleWebCommand(request))
+      .allCatch[Option[Future[SimpleResult]]]
+      .either(applicationProvider.handleWebCommand(request).map(Future.successful))
       .left.map(logExceptionAndGetResult)
       .right.flatMap(maybeResult => maybeResult.toLeft(())).right.flatMap { _ =>
         sendHandler match {

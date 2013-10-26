@@ -1,3 +1,6 @@
+/*
+ * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ */
 package play.core.less
 
 import play.PlayExceptions.AssetCompilationException
@@ -6,7 +9,7 @@ import play.api._
 
 object LessCompiler {
 
-  val lessScript = "less-1.4.1.js"
+  val lessScript = "less-1.4.2.js"
 
   import org.mozilla.javascript._
   import org.mozilla.javascript.tools.shell._
@@ -84,9 +87,6 @@ object LessCompiler {
                             contents:env.contents,
                             dumpLineNumbers:window.less.dumpLineNumbers
                         }).parse(input, function (e, root) {
-                            if(e instanceof Object) {
-                                throw e;
-                            }
                             fn(e, root, input);
 
                             context.pop();
@@ -94,7 +94,7 @@ object LessCompiler {
                     }
 
                     new(window.less.Parser)({optimization:3, filename:String(source.getCanonicalPath())}).parse(String(LessCompiler.readContent(source)), function (e,root) {
-                        if(e instanceof Object) {
+                        if (e) {
                             throw e;
                         }
                         compiled = root.toCSS({compress: """ + (if (minify) "true" else "false") + """})
@@ -134,10 +134,10 @@ object LessCompiler {
       case e: JavaScriptException => {
 
         val error = e.getValue.asInstanceOf[Scriptable]
-        val filename = ScriptableObject.getProperty(error, "filename").asInstanceOf[String]
+        val filename = ScriptableObject.getProperty(error, "filename").toString
         val file = new File(filename)
         throw AssetCompilationException(Some(file),
-          ScriptableObject.getProperty(error, "message").asInstanceOf[String],
+          ScriptableObject.getProperty(error, "message").toString,
           Some(ScriptableObject.getProperty(error, "line").asInstanceOf[Double].intValue),
           Some(ScriptableObject.getProperty(error, "column").asInstanceOf[Double].intValue))
       }

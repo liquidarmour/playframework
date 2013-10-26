@@ -1,3 +1,4 @@
+<!--- Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com> -->
 # Play 2.2 Migration Guide
 
 This guide is for migrating a Play 2.1 application to Play 2.2.  To migrate from Play 2.0, first follow the [[Play 2.1 Migration Guide|Migration21]].
@@ -48,6 +49,11 @@ val addDependencies = Seq(
 
 Note that if you depend on plugins that depend on versions of Play prior to 2.2 then there will be a conflict within caching due to multiple caches being loaded. Update to a later plugin version or ensure that older Play versions are excluded if you see this issue.
 
+### sbt namespace no longer extended
+
+The `sbt` namespace was previously extended by Play e.g. `sbt.PlayCommands.intellijCommandSettings`. This is considered bad practice and so
+Play now uses its own namespace for sbt related things e.g. `play.PlayProject.intellijCommandSettings`.
+
 ## New results structure in Scala
 
 In order to simplify action composition and filtering, the Play results structure has been simplified.  There is now only one type of result, `SimpleResult`, where before there were `SimpleResult`, `ChunkedResult` and `AsyncResult`, plus the interfaces `Result` and `PlainResult`.  All except `SimpleResult` have been deprecated.  `Status`, a subclass of `SimpleResult`, still exists as a convenience class for building results.  In most cases, actions can still use the deprecated types, but they will get deprecation warnings.  Actions doing composition and filters however will have to switch to using `SimpleResult`.
@@ -64,7 +70,7 @@ def asyncAction = Action {
 }
 ```
 
-You can now use the `Action.async` builder:
+You can now use the [`Action.async`](api/scala/index.html#play.api.mvc.ActionBuilder) builder:
 
 ```scala
 def asyncAction = Action.async {
@@ -74,7 +80,7 @@ def asyncAction = Action.async {
 
 ### Working with chunked results
 
-Previously the `stream` method on `Status` was used to produce chunked results.  This has been deprecated, replaced with a `chunked` method, that makes it clear that the result is going to be chunked.  For example:
+Previously the `stream` method on `Status` was used to produce chunked results.  This has been deprecated, replaced with a [`chunked`](api/scala/index.html#play.api.mvc.Results$Status) method, that makes it clear that the result is going to be chunked.  For example:
 
 ```scala
 def cometAction = Action {
@@ -86,9 +92,9 @@ Advanced uses that created or used `ChunkedResult` directly should be replaced w
 
 ### Action composition
 
-We are now recommending that action composition be done at the `EssentialAction` level, not the `Action` level, and that end users write their own `ActionBuilder` implementations for building actions.
+We are now recommending that action composition be done using [`ActionBuilder`](api/scala/index.html#play.api.mvc.ActionBuilder) implementations for building actions.
 
-TODO: Update/write documentation on how to do this, best practices etc.
+Details on how to do these can be found [[here|ScalaActionsComposition]].
 
 ### Filters
 
@@ -145,6 +151,40 @@ Iteratee.foreach[String] { msg =>
 }
 ```
 
+## Concurrent F.Promise execution
+
+The way that the [`F.Promise`](api/java/play/libs/F.Promise.html) class executes user-supplied code has changed in Play 2.2.
+
+In Play 2.1, the `F.Promise` class restricted how user code was executed. Promise operations for a given HTTP request would execute in the order that they were submitted, essentially running sequentially.
+
+With Play 2.2, this restriction on ordering has been removed so that promise operations can execute concurrently. Work executed by the `F.Promise` class now uses [[Play's default thread pool|ThreadPools]] without placing any additional restrictions on execution.
+
+However, for those who still want it, Play 2.1's legacy behavior has been captured in the `OrderedExecutionContext` class. The legacy behavior of Play 2.1 can be easily recreated by supplying an `OrderedExecutionContext` as an argument to any of `F.Promise`'s methods.
+
+The following code shows how to recreate Play 2.1's behaviour in Play 2.2. Note that this example uses the same settings as Play 2.1: a pool of 64 actors running within Play's default `ActorSystem`.
+
+````java
+import play.core.j.OrderedExecutionContext;
+import play.libs.Akka;
+import play.libs.F.*;
+import scala.concurrent.ExecutionContext;
+
+ExecutionContext orderedExecutionContext = new OrderedExecutionContext(Akka.system(), 64);
+Promise<Double> pi = Promise.promise(new Function0<Double>() {
+  Double apply() {
+    return Math.PI;
+  }
+}, orderedExecutionContext);
+Promise<Double> mappedPi = pi.map(new Function<Double, Double>() {
+  Double apply(x Double) {
+    return 2 * x;
+  }
+}, orderedExecutionContext);
+````
+
+## Jackson Json
+We have upgraded Jackson to version 2 which means that the package name is now `com.fasterxml.jackson.core` instead of `org.codehaus.jackson`.
+
 ## Preparing a distribution
 
 The _stage_ and _dist_ tasks have been completely re-written in Play 2.2 so that they use the [Native Packager Plugin](https://github.com/sbt/sbt-native-packager). 
@@ -156,3 +196,7 @@ Another thing that has changed is the location of the Unix script that starts a 
 > Please note that the format of the arguments passed to the `start` script has changed. Please issue a `-h` on the `start` script to see the arguments now accepted.
 
 Please consult the [["Starting your application in production mode"|Production]] documentation for more information on the new `stage` and `dist` tasks.
+
+## Upgrade from Akka 2.1 to 2.2
+
+The migration guide for upgrading from Akka 2.1 to 2.2 can be found [here](http://doc.akka.io/docs/akka/2.2.0/project/migration-guide-2.1.x-2.2.x.html).

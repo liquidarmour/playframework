@@ -1,3 +1,6 @@
+/*
+ * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ */
 package play
 
 import sbt.{ Project => SbtProject, _ }
@@ -22,27 +25,14 @@ trait PlayRun extends PlayInternalKeys {
    */
   val DocsApplication = config("docs") hide
 
-  // For some reason, jline disables echo when it creates a new console reader.
-  // When we use the reader, we also enabled echo after using it, so as long as this is lazy, and that holds true,
-  // then we won't exit SBT with echo disabled.
-  private lazy val consoleReader = new jline.console.ConsoleReader
+  // Regex to match Java System Properties of the format -Dfoo=bar
+  private val SystemProperty = "-D([^=]+)=(.*)".r
 
-  private def waitForKey() = {
-    def waitEOF() {
-      consoleReader.readCharacter() match {
-        case 4 => // STOP
-        case 11 => consoleReader.clearScreen(); waitEOF()
-        case 10 => println(); waitEOF()
-        case _ => waitEOF()
-      }
-
-    }
-    consoleReader.getTerminal.setEchoEnabled(false)
-    try {
-      waitEOF()
-    } finally {
-      consoleReader.getTerminal.setEchoEnabled(true)
-    }
+  /**
+   * Take all the options in javaOptions of the format "-Dfoo=bar" and return them as a Seq of key value pairs of the format ("foo" -> "bar")
+   */
+  private def extractSystemProperties(javaOptions: Seq[String]): Seq[(String, String)] = {
+    javaOptions.collect { case SystemProperty(key, value) => key -> value }
   }
 
   private def parsePort(portString: String): Int = {
@@ -84,22 +74,31 @@ trait PlayRun extends PlayInternalKeys {
   def playRunTask(
     runHooks: TaskKey[Seq[play.PlayRunHook]],
     dependencyClasspath: TaskKey[Classpath], dependencyClassLoader: TaskKey[ClassLoaderCreator],
+    reloaderClasspath: TaskKey[Classpath], reloaderClassLoader: TaskKey[ClassLoaderCreator]): SbtProject.Initialize[InputTask[Unit]] = {
+
+    playRunTask(runHooks, javaOptions in Runtime, dependencyClasspath, dependencyClassLoader, reloaderClasspath, reloaderClassLoader)
+  }
+
+  def playRunTask(
+    runHooks: TaskKey[Seq[play.PlayRunHook]], javaOptions: TaskKey[Seq[String]],
+    dependencyClasspath: TaskKey[Classpath], dependencyClassLoader: TaskKey[ClassLoaderCreator],
     reloaderClasspath: TaskKey[Classpath], reloaderClassLoader: TaskKey[ClassLoaderCreator]): SbtProject.Initialize[InputTask[Unit]] = inputTask { (argsTask: TaskKey[Seq[String]]) =>
     (
       argsTask, state, playCommonClassloader, managedClasspath in DocsApplication,
-      dependencyClasspath, dependencyClassLoader, reloaderClassLoader
-    ) map { (args, state, commonLoader, docsAppClasspath, appDependencyClasspath, createClassLoader, createReloader) =>
+      dependencyClasspath, dependencyClassLoader, reloaderClassLoader, javaOptions
+    ) map { (args, state, commonLoader, docsAppClasspath, appDependencyClasspath, createClassLoader, createReloader, javaOptions) =>
         val extracted = SbtProject.extract(state)
 
         val (_, hooks) = extracted.runTask(runHooks, state)
         val interaction = extracted.get(playInteractionMode)
 
         val (properties, httpPort, httpsPort) = filterArgs(args, defaultHttpPort = extracted.get(playDefaultPort))
+        val systemProperties = extractSystemProperties(javaOptions)
 
         require(httpPort.isDefined || httpsPort.isDefined, "You have to specify https.port when http.port is disabled")
 
         // Set Java properties
-        properties.foreach {
+        (properties ++ systemProperties).foreach {
           case (key, value) => System.setProperty(key, value)
         }
 
@@ -353,11 +352,13 @@ trait PlayRun extends PlayInternalKeys {
           //trigger a require build if needed
           SbtProject.runTask(buildRequire, state).get._2
 
+          val systemProperties = SbtProject.runTask(javaOptions in Production, state).get._2.toEither.right.getOrElse(Seq[String]())
+
           val classpath = dependencies.map(_.data).map(_.getCanonicalPath).reduceLeft(_ + java.io.File.pathSeparator + _)
 
           import java.lang.{ ProcessBuilder => JProcessBuilder }
           val builder = new JProcessBuilder(Seq(
-            "java") ++ (properties ++ System.getProperties.asScala).map { case (key, value) => "-D" + key + "=" + value } ++ Seq("-Dhttp.port=" + httpPort.getOrElse("disabled"), "-cp", classpath, "play.core.server.NettyServer", extracted.currentProject.base.getCanonicalPath): _*)
+            "java") ++ (properties ++ System.getProperties.asScala).map { case (key, value) => "-D" + key + "=" + value } ++ systemProperties ++ Seq("-Dhttp.port=" + httpPort.getOrElse("disabled"), "-cp", classpath, "play.core.server.NettyServer", extracted.currentProject.base.getCanonicalPath): _*)
 
           new Thread {
             override def run {

@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ */
+import java.util.jar.JarFile
 import play.console.Colors
 import play.core.server.ServerWithStop
 import sbt._
@@ -5,7 +9,7 @@ import sbt.Keys._
 import play.Keys._
 import play.core.{ SBTDocHandler, SBTLink, PlayVersion }
 import play.PlaySourceGenerators._
-import scala.Some
+import DocValidation._
 
 object ApplicationBuild extends Build {
 
@@ -17,7 +21,9 @@ object ApplicationBuild extends Build {
       component("play-test") % "test",
       component("play-java") % "test",
       component("play-cache") % "test",
-      component("play-docs") % "runtime"
+      component("filters-helpers") % "test",
+      "org.mockito" % "mockito-core" % "1.9.5" % "test",
+      component("play-docs")
     ),
 
     javaManualSourceDirectories <<= (baseDirectory)(base => (base / "manual" / "javaGuide" ** "code").get),
@@ -25,11 +31,11 @@ object ApplicationBuild extends Build {
 
     unmanagedSourceDirectories in Test <++= javaManualSourceDirectories,
     unmanagedSourceDirectories in Test <++= scalaManualSourceDirectories,
-    unmanagedSourceDirectories in Test <++= (baseDirectory)(base => (base / "manual" / "detailledTopics" ** "code").get),
+    unmanagedSourceDirectories in Test <++= (baseDirectory)(base => (base / "manual" / "detailedTopics" ** "code").get),
 
     unmanagedResourceDirectories in Test <++= javaManualSourceDirectories,
     unmanagedResourceDirectories in Test <++= scalaManualSourceDirectories,
-    unmanagedResourceDirectories in Test <++= (baseDirectory)(base => (base / "manual" / "detailledTopics" ** "code").get),
+    unmanagedResourceDirectories in Test <++= (baseDirectory)(base => (base / "manual" / "detailedTopics" ** "code").get),
 
     parallelExecution in Test := false,
 
@@ -39,17 +45,17 @@ object ApplicationBuild extends Build {
 
     // Need to ensure that templates in the Java docs get Java imports, and in the Scala docs get Scala imports
     sourceGenerators in Test <+= (state, javaManualSourceDirectories, sourceManaged in Test, templatesTypes) map { (s, ds, g, t) =>
-      ds.flatMap(d => ScalaTemplates(s, d, g, t, defaultTemplatesImport ++ defaultJavaTemplatesImport))
+      ScalaTemplates(s, ds, g, t, defaultTemplatesImport ++ defaultJavaTemplatesImport)
     },
     sourceGenerators in Test <+= (state, scalaManualSourceDirectories, sourceManaged in Test, templatesTypes) map { (s, ds, g, t) =>
-      ds.flatMap(d => ScalaTemplates(s, d, g, t, defaultTemplatesImport ++ defaultScalaTemplatesImport))
+      ScalaTemplates(s, ds, g, t, defaultTemplatesImport ++ defaultScalaTemplatesImport)
     },
 
     sourceGenerators in Test <+= (state, javaManualSourceDirectories, sourceManaged in Test) map  { (s, ds, g) =>
-      ds.flatMap(d => RouteFiles(s, d, g, Seq("play.libs.F"), true, true))
+      RouteFiles(s, ds, g, Seq("play.libs.F"), true, true)
     },
     sourceGenerators in Test <+= (state, scalaManualSourceDirectories, sourceManaged in Test) map  { (s, ds, g) =>
-      ds.flatMap(d => RouteFiles(s, d, g, Seq(), true, true))
+      RouteFiles(s, ds, g, Seq(), true, true)
     },
 
     templatesTypes := Map(
@@ -58,7 +64,9 @@ object ApplicationBuild extends Build {
 
     run <<= docsRunSetting,
 
-    DocValidation.validateDocs <<= DocValidation.ValidateDocsTask,
+    generateMarkdownReport <<= GenerateMarkdownReportTask,
+    validateDocs <<= ValidateDocsTask,
+    validateExternalLinks <<= ValidateExternalLinksTask,
 
     testOptions in Test += Tests.Argument(TestFrameworks.Specs2, "sequential", "true", "junitxml", "console"),
     testOptions in Test += Tests.Argument(TestFrameworks.JUnit, "--ignore-runners=org.specs2.runner.JUnitRunner"),
@@ -101,10 +109,14 @@ object ApplicationBuild extends Build {
       }
 
       val projectPath = extracted.get(baseDirectory)
+      val docsJarFile = {
+        val f = classpath.map(_.data).filter(_.getName.startsWith("play-docs")).head
+        new JarFile(f)
+      }
       val sbtDocHandler = {
         val docHandlerFactoryClass = classloader.loadClass("play.docs.SBTDocHandlerFactory")
-        val fromDirectoryMethod = docHandlerFactoryClass.getMethod("fromDirectory", classOf[java.io.File])
-        fromDirectoryMethod.invoke(null, projectPath)
+        val fromDirectoryMethod = docHandlerFactoryClass.getMethod("fromDirectoryAndJar", classOf[java.io.File], classOf[JarFile], classOf[String])
+        fromDirectoryMethod.invoke(null, projectPath, docsJarFile, "play/docs/content")
       }
 
       val clazz = classloader.loadClass("play.docs.DocumentationServer")

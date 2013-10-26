@@ -1,3 +1,6 @@
+/*
+ * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ */
 package play.api
 
 import play.core._
@@ -7,13 +10,12 @@ import play.api.mvc._
 
 import java.io._
 
-import scala.collection.JavaConverters._
-
 import annotation.implicitNotFound
 
 import java.lang.reflect.InvocationTargetException
 import reflect.ClassTag
 import scala.util.control.NonFatal
+import scala.concurrent.Future
 
 trait WithDefaultGlobal {
   self: Application with WithDefaultConfiguration =>
@@ -284,7 +286,7 @@ trait Application {
   /**
    * Handle a runtime error during the execution of an action
    */
-  private[play] def handleError(request: RequestHeader, e: Throwable): SimpleResult = try {
+  private[play] def handleError(request: RequestHeader, e: Throwable): Future[SimpleResult] = try {
     e match {
       case e: UsefulException => throw e
       case e: Throwable => {

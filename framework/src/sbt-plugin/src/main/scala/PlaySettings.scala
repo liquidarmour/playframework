@@ -1,10 +1,15 @@
+/*
+ * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ */
 package play
 
 import sbt.{ Project => SbtProject, _ }
 import sbt.Keys._
 import Keys._
-import PlayEclipse._
 import com.typesafe.sbt.SbtNativePackager._
+import com.typesafe.sbt.packager.Keys._
+import java.io.{ Writer, PrintWriter }
+import play.console.Colors
 
 trait Settings {
   this: PlayCommands with PlayPositionMapper with PlayRun with PlaySourceGenerators =>
@@ -84,6 +89,12 @@ trait Settings {
 
     testOptions in Test += Tests.Argument(TestFrameworks.JUnit, "--ignore-runners=org.specs2.runner.JUnitRunner"),
 
+    // Make sure Specs2 is at the end of the list of test frameworks, so that it gets priority over
+    // JUnit. This is a hack/workaround to prevent Specs2 tests with @RunsWith annotations being
+    // picked up by JUnit. We don't want JUnit to run the tests since JUnit ignores the Specs2
+    // runnner, which means the tests run but their results are ignored by SBT.
+    testFrameworks ~= { tf => tf.filter(_ != TestFrameworks.Specs2).:+(TestFrameworks.Specs2) },
+
     testListeners <<= (target, streams).map((t, s) => Seq(new eu.henkelmann.sbt.JUnitXmlTestsListener(t.getAbsolutePath, s.log))),
 
     testResultReporter <<= testResultReporterTask,
@@ -94,12 +105,14 @@ trait Settings {
 
     namespaceReverseRouter := false,
 
-    sourceGenerators in Compile <+= (state, confDirectory, sourceManaged in Compile, routesImport, generateReverseRouter, namespaceReverseRouter) map RouteFiles,
+    sourceGenerators in Compile <+= (state, confDirectory, sourceManaged in Compile, routesImport, generateReverseRouter, namespaceReverseRouter) map { (s, cd, sm, ri, grr, nrr) =>
+      RouteFiles(s, Seq(cd), sm, ri, grr, nrr)
+    },
 
     // Adds config directory's source files to continuous hot reloading
     watchSources <+= confDirectory map { all => all },
 
-    sourceGenerators in Compile <+= (state, sourceDirectory in Compile, sourceManaged in Compile, templatesTypes, templatesImport) map ScalaTemplates,
+    sourceGenerators in Compile <+= (state, unmanagedSourceDirectories in Compile, sourceManaged in Compile, templatesTypes, templatesImport) map ScalaTemplates,
 
     // Adds app directory's source files to continuous hot reloading
     watchSources <++= baseDirectory map { path => ((path / "app") ** "*" --- (path / "app/assets") ** "*").get },
@@ -116,6 +129,8 @@ trait Settings {
     mainClass in (Compile, run) := Some("play.core.server.NettyServer"),
 
     compile in (Compile) <<= PostCompile(scope = Compile),
+
+    compile in Test <<= PostCompile(Test),
 
     computeDependencies <<= computeDependenciesTask,
 
@@ -207,8 +222,6 @@ trait Settings {
 
     templatesImport := defaultTemplatesImport,
 
-    scalaIdePlay2Prefs <<= (state, thisProjectRef, baseDirectory) map { (s, r, baseDir) => saveScalaIdePlay2Prefs(r, SbtProject structure s, baseDir) },
-
     templatesTypes := Map(
       "html" -> "play.api.templates.HtmlFormat",
       "txt" -> "play.api.templates.TxtFormat",
@@ -249,7 +262,45 @@ trait Settings {
           readmeFile: File =>
             readmeFile -> readmeFile.getName
         }
-    }
+    },
+
+    // Adds the Play application directory to the command line args passed to Play
+    bashScriptExtraDefines += "addJava \"-Duser.dir=$(cd \"${app_home}/..\"; pwd -P)\"\n"
 
   )
+
+  /**
+   * Add this to your build.sbt, eg:
+   *
+   * {{{
+   *   play.Project.emojiLogs
+   * }}}
+   *
+   * Note that this setting is not supported and may break or be removed or changed at any time.
+   */
+  lazy val emojiLogs = logManager ~= { lm =>
+    new LogManager {
+      def apply(data: sbt.Settings[Scope], state: State, task: Def.ScopedKey[_], writer: java.io.PrintWriter) = {
+        val l = lm.apply(data, state, task, writer)
+        val FailuresErrors = "(?s).*(\\d+) failures?, (\\d+) errors?.*".r
+        new Logger {
+          def filter(s: String) = {
+            val filtered = s.replace("\033[32m+\033[0m", "\u2705 ")
+              .replace("\033[33mx\033[0m", "\u274C ")
+              .replace("\033[31m!\033[0m", "\uD83D\uDCA5 ")
+            filtered match {
+              case FailuresErrors("0", "0") => filtered + " \uD83D\uDE04"
+              case FailuresErrors(_, _) => filtered + " \uD83D\uDE22"
+              case _ => filtered
+            }
+          }
+          def log(level: Level.Value, message: => String) = l.log(level, filter(message))
+          def success(message: => String) = l.success(message)
+          def trace(t: => Throwable) = l.trace(t)
+
+          override def ansiCodesSupported = l.ansiCodesSupported
+        }
+      }
+    }
+  }
 }
