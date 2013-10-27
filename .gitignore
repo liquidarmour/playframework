@@ -20,4 +20,5 @@ RUNNING_PID
 .cache
 *.iml
 documentation/*.pdf
+framework/atlassian-ide-plugin.xml
 framework/test/integrationtest-java/conf/evolutions/
